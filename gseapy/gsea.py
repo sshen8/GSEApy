@@ -127,8 +127,7 @@ class GSEAbase(object):
             if isinstance(subset_list, set):
                 subset_list = list(subset_list)
                 genesets_dict[subset] = subset_list
-            tag_indicator = np.in1d(gene_list, subset_list, assume_unique=True)
-            tag_len = tag_indicator.sum()
+            tag_len = len(set(gene_list) & set(subset_list))
             if  (self.min_size <= tag_len <= self.max_size) and tag_len < len(gene_list): 
                 # tag_len should < gene_list
                 continue
@@ -729,19 +728,30 @@ class SingleSampleGSEA(GSEAbase):
             tempdat.append(dat)
             rankings.append(dat)
             names.append(name)
+        
+        # precalculate mapping from gene to gene set membership bools
+        gene_set_mapping = {}
+        for set_idx, key in enumerate(subsets):
+            for gene in gmt[key]:
+                if gene not in gene_set_mapping:
+                    gene_set_mapping[gene] = np.zeros(len(gmt), dtype=bool)
+                gene_set_mapping[gene][set_idx] = True
 
+        def _calc_enrichment_score_tensor(progress, *args, **kwargs):
+            self._logger.info(progress)
+            return enrichment_score_tensor(*args, **kwargs)
         tempes = Parallel(n_jobs=self._processes)(
-                             delayed(enrichment_score_tensor)(
-                                               dat.index.values, dat.values, gmt,
+                             delayed(_calc_enrichment_score_tensor)(
+                                               "Calculate Enrichment Score for Sample: %s (%d of %d)"%(name, i + 1, df.shape[1]),
+                                               dat.index.values, dat.values, gene_set_mapping,
                                                self.weighted_score_type,
                                                self.permutation_num, rs, True,
                                                self.scale) 
-                             for dat, rs in zip(tempdat, random_state))
+                             for i, (name, dat, rs) in enumerate(zip(names, tempdat, random_state)))
 
         # save results and plotting
         for i, temp in enumerate(tempes):
             name, rnk = names[i], rankings[i]
-            self._logger.info("Calculate Enrichment Score for Sample: %s "%name)
             # es, esnull, hit_ind, RES = temp.get()
             es, esnull, hit_ind, RES = temp
             # create results subdir

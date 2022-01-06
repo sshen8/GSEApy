@@ -85,8 +85,7 @@ def enrichment_score(gene_list, correl_vector, gene_set, weighted_score_type=1,
     return es, esnull, hit_ind, RES
 
 
-
-def enrichment_score_tensor(gene_mat, cor_mat, gene_sets, weighted_score_type, nperm=1000,
+def enrichment_score_tensor(gene_mat, cor_mat, gene_set_mapping, weighted_score_type, nperm=1000,
                             seed=None, single=False, scale=False):
     """Next generation algorithm of GSEA and ssGSEA. Works for 3d array
 
@@ -111,7 +110,7 @@ def enrichment_score_tensor(gene_mat, cor_mat, gene_sets, weighted_score_type, n
     """
     rs = np.random.RandomState(seed)
     # gene_mat -> 1d: prerank, ssSSEA or 2d: GSEA
-    keys = sorted(gene_sets.keys())
+    M = len(next(iter(gene_set_mapping.values())))
 
     if weighted_score_type == 0:
         # don't bother doing calcuation, just set to 1
@@ -126,19 +125,20 @@ def enrichment_score_tensor(gene_mat, cor_mat, gene_sets, weighted_score_type, n
     if cor_mat.ndim ==1:
         # ssGSEA or Prerank
         # genestes->M, genes->N, perm-> axis=2
-        N, M = len(gene_mat), len(keys)
+        N = len(gene_mat)
         # generate gene hits matrix
-        # for 1d ndarray of gene_mat, set assume_unique=True,
-        # means the input arrays are both assumed to be unique,
-        # which can speed up the calculation.
-        tag_indicator = np.vstack([np.in1d(gene_mat, gene_sets[key], assume_unique=True) for key in keys])
+        # tag indicator is boolean matrix of size "gene_sets" x "genes" indicating whether the gene is in the gene set
+        tag_indicator = np.stack([gene_set_mapping.get(x, np.zeros(M, dtype=bool)) for x in gene_mat], axis=1)
         tag_indicator = tag_indicator.astype(int)
         # index of hits
         hit_ind = [ np.flatnonzero(tag).tolist() for tag in tag_indicator ]
-        # generate permutated hits matrix
-        perm_tag_tensor = np.repeat(tag_indicator, nperm+1).reshape((M,N,nperm+1))
-        # shuffle matrix, last matrix is not shuffled when nperm > 0
-        if nperm: np.apply_along_axis(lambda x: np.apply_along_axis(rs.shuffle,0,x),1, perm_tag_tensor[:,:,:-1])
+        if nperm:
+            # generate permutated hits matrix
+            perm_tag_tensor = np.repeat(tag_indicator, nperm+1).reshape((M,N,nperm+1))
+            # shuffle matrix, last matrix is not shuffled when nperm > 0
+            np.apply_along_axis(lambda x: np.apply_along_axis(rs.shuffle,0,x),1, perm_tag_tensor[:,:,:-1])
+        else:
+            perm_tag_tensor = tag_indicator[..., np.newaxis]
         # missing hits
         no_tag_tensor = 1 - perm_tag_tensor
         # calculate numerator, denominator of each gene hits
@@ -154,7 +154,7 @@ def enrichment_score_tensor(gene_mat, cor_mat, gene_sets, weighted_score_type, n
         # genestes->M, genes->N, perm-> axis=2
         # don't use assume_unique=True in 2d array when use np.isin().
         # elements in gene_mat are not unique, or will cause unwanted results
-        tag_indicator = np.vstack([np.in1d(genes, gene_sets[key], assume_unique=True) for key in keys])
+        tag_indicator = np.stack([gene_set_mapping.get(x, np.zeros(M, dtype=bool)) for x in genes], axis=1)
         tag_indicator = tag_indicator.astype(int)
         perm_tag_tensor = np.stack([tag.take(genes_ind).T for tag in tag_indicator], axis=0)
         #index of hits
