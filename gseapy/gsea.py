@@ -713,21 +713,9 @@ class SingleSampleGSEA(GSEAbase):
         self.resultsOnSamples = OrderedDict()
         outdir = self.outdir
         # run ssgsea for gct expression matrix
-        #multi-threading
         subsets = sorted(gmt.keys())
-        tempdat=[]
-        tempes=[]
-        names=[]
-        rankings=[]
-        #pool = Pool(processes=self._processes)
         np.random.seed(self.seed)
         random_state = np.random.randint(np.iinfo(np.int32).max, size=df.shape[1])
-        for name, ser in df.iteritems():
-            #prepare input
-            dat = ser.sort_values(ascending=self.ascending)
-            tempdat.append(dat)
-            rankings.append(dat)
-            names.append(name)
         
         # precalculate mapping from gene to gene set membership bools
         gene_set_mapping = {}
@@ -737,23 +725,17 @@ class SingleSampleGSEA(GSEAbase):
                     gene_set_mapping[gene] = np.zeros(len(gmt), dtype=bool)
                 gene_set_mapping[gene][set_idx] = True
 
-        def _calc_enrichment_score_tensor(progress, *args, **kwargs):
-            self._logger.info(progress)
-            return enrichment_score_tensor(*args, **kwargs)
-        tempes = Parallel(n_jobs=self._processes)(
-                             delayed(_calc_enrichment_score_tensor)(
-                                               "Calculate Enrichment Score for Sample: %s (%d of %d)"%(name, i + 1, df.shape[1]),
+        # save results and plotting
+        for i, ((name, ser), rs) in enumerate(zip(df.iteritems(), random_state)):
+            self._logger.info("Calculate Enrichment Score for Sample: %s (%d of %d)"%(name, i + 1, df.shape[1]))
+            #prepare input
+            dat = ser.sort_values(ascending=self.ascending)
+            rnk = dat
+            es, esnull, hit_ind, RES = enrichment_score_tensor(
                                                dat.index.values, dat.values, gene_set_mapping,
                                                self.weighted_score_type,
                                                self.permutation_num, rs, True,
-                                               self.scale) 
-                             for i, (name, dat, rs) in enumerate(zip(names, tempdat, random_state)))
-
-        # save results and plotting
-        for i, temp in enumerate(tempes):
-            name, rnk = names[i], rankings[i]
-            # es, esnull, hit_ind, RES = temp.get()
-            es, esnull, hit_ind, RES = temp
+                                               self.scale)
             # create results subdir
             self.outdir= os.path.join(outdir, str(name))
             mkdirs(self.outdir)
